@@ -9,15 +9,18 @@ from support import ham_distance, hamming_distances
 
 
 class FeatureCollection():
-    def __init__(self, indeces):
-        self.indeces = indeces
+    def __init__(self, indices):
+        if isinstance(indices, int):
+            self.indices = [indices]
+        else:
+            self.indices = indices
 
     def __add__(self, ft2):
-        self.indeces.extend(ft2.indeces)
+        self.indices.extend(ft2.indices)
         return self
 
     def __repr__(self):
-        return str(self.indeces)
+        return str(self.indices)
 
 
 class CascadingEnsemble():
@@ -25,6 +28,7 @@ class CascadingEnsemble():
     def __init__(self):
         logger.debug("Initialising CascadingEnsemble...")
         self.features = None
+        self.feature_collections = []
 
     def fit(self, X, y):
         logger.info(f"Fitting X {X.shape} and y {y.shape} ...")
@@ -34,7 +38,8 @@ class CascadingEnsemble():
         logger.debug(f"Features: {self.features}")
 
         '''Generate feature collections'''
-        self._make_feature_collections(X)
+        self._make_feature_collections_simple(X)
+        logger.debug(f"{self.feature_collections}")
 
         '''Assign feature collections to estimators'''
 
@@ -62,6 +67,37 @@ class CascadingEnsemble():
     def _encode_features(self, X):
         logger.debug("Encoding features...")
         self.features = {i: None for i in range(X.shape[1])}
+
+    def _make_feature_collections_simple(self, X):
+
+        def nan_count(vec):
+            return np.sum(np.isnan(vec))
+
+        feat_cols = []
+
+        feat_vecs = np.hsplit(X, X.shape[1])
+        feat_nans = {i: nan_count(v) for i, v in enumerate(feat_vecs)}
+        logger.debug(f"feat_nans: {feat_nans}")
+
+        ordered = {k: v for k, v in sorted(
+            feat_nans.items(), key=lambda x: x[1])}
+        logger.debug(f"Ordered feat_nans: {ordered}")
+
+        ord_ind = list(ordered.keys())
+
+        N_main = len(ord_ind) // 3 - 1
+        N_addon = len(ord_ind) - 3 * N_main
+        logger.debug(f"N_main: {N_main} ({3*N_main}), N_addon: {N_addon}")
+
+        for i in range(N_main):
+            feat_cols.append(
+                FeatureCollection(ord_ind[i*3:(i+1)*3]))
+            start = i
+
+        for i in range(start, N_addon+1):
+            feat_cols.append(FeatureCollection(ord_ind[i]))
+
+        self.feature_collections = feat_cols
 
     def _make_feature_collections(self, X):
         feature_collections = []
@@ -104,7 +140,8 @@ class CascadingEnsemble():
 
             new_feature_collections = []
             for (a, b) in pairs:
-                new_feature_collections.append(feature_collections[a] + feature_collections[b])
+                new_feature_collections.append(
+                    feature_collections[a] + feature_collections[b])
 
             for rem in remaining:
                 new_feature_collections.append(feature_collections[rem])
