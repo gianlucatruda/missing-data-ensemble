@@ -15,7 +15,9 @@ from mlxtend.regressor import StackingRegressor
 
 
 class FeatureCollection():
-    def __init__(self, indices):
+    def __init__(self, indices, nan_vect):
+        self.nan_vect = nan_vect
+
         if isinstance(indices, int):
             self.indices = [indices]
         else:
@@ -23,6 +25,7 @@ class FeatureCollection():
 
     def __add__(self, ft2):
         self.indices.extend(ft2.indices)
+        self.nan_vect = self.nan_vect * ft2.nan_vect
         return self
 
     def __repr__(self):
@@ -101,22 +104,28 @@ class CascadeNode(BaseEstimator):
 
 class CascadingEnsemble():
 
-    def __init__(self, estimator_class=LinearRegression):
+    def __init__(self, estimator_class=LinearRegression, n_nodes=None):
         logger.debug("Initialising CascadingEnsemble...")
         self.features = None
         self.feature_collections = []
         self.estimator_class = estimator_class
         self.nodes = {}
+        self.__n_nodes = n_nodes
 
     def fit(self, X, y):
         logger.info(f"Fitting X {X.shape} and y {y.shape} ...")
+
+        if self.__n_nodes is None:
+            self.__n_nodes = X.shape[1] * (1 + X.shape[0] // 500) // 3
+            logger.debug(f"Using {self.__n_nodes} nodes.")
 
         '''Organise / identify features'''
         self._encode_features(X)
         logger.debug(f"Features: {self.features}")
 
         '''Generate prioritised feature collections'''
-        self._make_feature_collections_simple(X)
+        # self._make_feature_collections_simple(X)
+        self._make_feature_collections(X)
         logger.debug(f"{self.feature_collections}")
 
         '''Assign feature collections to estimators'''
@@ -182,11 +191,6 @@ class CascadingEnsemble():
         self.feature_collections = feat_cols
 
     def _make_feature_collections(self, X):
-        feature_collections = []
-        for i in range(X.shape[1]):
-            feature_collections.append(FeatureCollection([i]))
-
-        logger.debug(f"Initial feat. cols.:\n{feature_collections}")
 
         logger.debug(f"Making missing value filter...")
         _X = np.isnan(X)
@@ -196,10 +200,17 @@ class CascadingEnsemble():
         nan_vectors = np.hsplit(_X, _X.shape[1])
         logger.debug(f"nan_vectors: {len(nan_vectors)}")
 
+        feature_collections = []
+        for i in range(X.shape[1]):
+            feature_collections.append(FeatureCollection([i], nan_vectors[i]))
+
+        logger.debug(f"Initial feat. cols.:\n{feature_collections}")
+
         done = False
-        for n in range(3):
+        last_remaining = None
+        while not done:
             logger.debug(f"Feat. cols.:\n{feature_collections}")
-            # new_feature_collections = []
+            nan_vectors = [fc.nan_vect for fc in feature_collections]
             dists = hamming_distances(nan_vectors)
             logger.debug(f"Ham dists:\n{dists}")
             favourites = []
@@ -230,14 +241,18 @@ class CascadingEnsemble():
 
             feature_collections = new_feature_collections
 
-            if True:
+            # if last_remaining == remaining:
+            if len(feature_collections) <= self.__n_nodes:
                 done = True
 
+            last_remaining = remaining
+
+        self.feature_collections = feature_collections
 
 if __name__ == '__main__':
 
     logger.remove()
-    logger.add(sys.stderr, level="INFO")
+    logger.add(sys.stderr, level="DEBUG")
 
     import warnings
     from sklearn.exceptions import ConvergenceWarning
@@ -254,7 +269,7 @@ if __name__ == '__main__':
     X_train, X_test, y_train, y_test = train_test_split(X, y)
 
     X_train_nan = X_train.copy()
-    nan_targets = np.random.randint(10, size=(X_train.shape))
+    nan_targets = np.random.randint(3, size=(X_train.shape))
     X_train_nan[nan_targets == 1] = np.NaN
 
     logger.debug(
