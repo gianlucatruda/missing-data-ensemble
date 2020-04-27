@@ -2,10 +2,11 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn import datasets
 from sklearn.metrics import mean_squared_error
-from sklearn.linear_model import LinearRegression
+from sklearn.linear_model import LinearRegression, Lasso
 import pandas as pd
 from loguru import logger
 from support import ham_distance, hamming_distances
+import sys
 
 
 class FeatureCollection():
@@ -37,7 +38,6 @@ class CascadeNode():
 
         _X = X[:, self.feature_col.indices]
         good_filter = np.prod(~np.isnan(_X), axis=1) == 1
-        miss_filter = np.prod(np.isnan(_X), axis=1) == 1
 
         X_train = _X[good_filter, :]
         y_train = y[good_filter]
@@ -225,6 +225,9 @@ class CascadingEnsemble():
 
 if __name__ == '__main__':
 
+    logger.remove()
+    logger.add(sys.stderr, level="INFO")
+
     import warnings
     warnings.filterwarnings(action="ignore", module="sklearn",
                             message="^internal gelsd")
@@ -247,7 +250,7 @@ if __name__ == '__main__':
     logger.debug(
         f"{X_train.shape}, {y_train.shape}, {X_test.shape}, {y_test.shape}")
 
-    casc = CascadingEnsemble()
+    casc = CascadingEnsemble(estimator_class=Lasso)
     casc.fit(X_train_nan, y_train)
     pred = casc.predict(X_test)
 
