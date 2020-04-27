@@ -1,8 +1,11 @@
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn import datasets
-from sklearn.metrics import mean_squared_error
-from sklearn.linear_model import LinearRegression, Lasso
+from sklearn.metrics import mean_squared_error as mse
+from sklearn.linear_model import LinearRegression, Lasso, BayesianRidge
+from sklearn.neural_network import MLPRegressor
+from sklearn.naive_bayes import GaussianNB
+from xgboost import XGBRegressor
 import pandas as pd
 from loguru import logger
 from support import ham_distance, hamming_distances
@@ -226,11 +229,14 @@ class CascadingEnsemble():
 if __name__ == '__main__':
 
     logger.remove()
-    logger.add(sys.stderr, level="INFO")
+    logger.add(sys.stderr, level="WARNING")
 
     import warnings
+    from sklearn.exceptions import ConvergenceWarning
     warnings.filterwarnings(action="ignore", module="sklearn",
                             message="^internal gelsd")
+    warnings.filterwarnings(action="ignore", module="sklearn",
+                            category=ConvergenceWarning)
 
     boston = datasets.load_boston()
     X = boston.data
@@ -240,26 +246,54 @@ if __name__ == '__main__':
     X_train, X_test, y_train, y_test = train_test_split(X, y)
 
     X_train_nan = X_train.copy()
-    nan_targets = np.random.randint(4, size=(X_train.shape))
+    nan_targets = np.random.randint(3, size=(X_train.shape))
     X_train_nan[nan_targets == 1] = np.NaN
-
-    # X_test_nan = X_test.copy()
-    # nan_targets = np.random.randint(20, size=(X_test.shape))
-    # X_test_nan[nan_targets == 19] = np.NaN
 
     logger.debug(
         f"{X_train.shape}, {y_train.shape}, {X_test.shape}, {y_test.shape}")
 
-    casc = CascadingEnsemble(estimator_class=Lasso)
-    casc.fit(X_train_nan, y_train)
-    pred = casc.predict(X_test)
 
-    casc_score = mean_squared_error(y_test, pred)
+    results = {}
 
-    lr = LinearRegression(normalize=True)
-    lr_X = np.nan_to_num(X_train_nan)
-    lr.fit(lr_X, y_train)
-    lr_score = mean_squared_error(y_test, lr.predict(X_test))
+    # Make a version of X_train by filling NaNs with zero
+    X_train_filled = np.nan_to_num(X_train_nan)
 
-    logger.info(f"LR  MSE: {lr_score: .3f}")
-    logger.info(f"CSC MSE: {casc_score: .3f}")
+    # Make a version of X_train by filling NaNs with median
+    X_train_filled_med = X_train_nan.copy()
+    for i in range(X_train_nan.shape[1]):
+        med = np.nanmedian(X_train_filled_med[:, i])
+        X_train_filled_med = np.where(
+            np.isnan(X_train_filled_med), med, X_train_filled_med)
+
+    # Make a version of X_train (and corresp y) by dropping NaN rows
+    keep_filter = np.prod(~np.isnan(X_train_nan), axis=1) == 1
+    X_train_dropped = X_train_nan[keep_filter, :]
+    y_train_dropped = y_train[keep_filter]
+
+    print(X_train_nan.shape, X_train_filled.shape, X_train_dropped.shape)
+
+    for est_class in [LinearRegression, Lasso, MLPRegressor, XGBRegressor]:
+        casc = CascadingEnsemble(estimator_class=est_class)
+        casc.fit(X_train_nan, y_train)
+        pred = casc.predict(X_test)
+        results[f"CSC ({est_class.__name__})"] = mse(y_test, pred)
+
+    comparison_models = [LinearRegression, Lasso,
+                         MLPRegressor, BayesianRidge, XGBRegressor]
+
+    for mod in comparison_models:
+
+        model = mod().fit(X_train, y_train)
+        results[f"{mod.__name__} (full)"] = mse(y_test, model.predict(X_test))
+
+
+        model = mod().fit(X_train_filled, y_train)
+        results[f"{mod.__name__} (fill 0)"] = mse(y_test, model.predict(X_test))
+
+        model = mod().fit(X_train_filled_med, y_train)
+        results[f"{mod.__name__} (fill m)"] = mse(y_test, model.predict(X_test))
+
+        model = mod().fit(X_train_dropped, y_train_dropped)
+        results[f"{mod.__name__} (drop)"] = mse(y_test, model.predict(X_test))
+
+    print(pd.DataFrame.from_dict(results, orient='index').sort_values(by=0))
