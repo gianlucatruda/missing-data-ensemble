@@ -130,17 +130,11 @@ class CascadingEnsemble():
     def predict(self, X):
         logger.info(f"Predicting X {X.shape} ...")
 
-        '''For each x in X:'''
+        '''CascadeNodes call previous node themselves, so we just predict on last'''
 
-        '''Determine feature collections for vector'''
-
-        '''Get each estimator's prediction in sequence'''
-
-        '''Produce single unified prediction'''
-
-        y_hat = np.random.randint(5, high=50, size=(X.shape[0]))
-
-        return y_hat
+        Y = self.nodes[self.feature_collections[-1]].predict(X)
+        # Return only the predictions (not ins and is_missing)
+        return Y[:, 1]
 
     def _encode_features(self, X):
         logger.debug("Encoding features...")
