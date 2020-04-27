@@ -20,15 +20,85 @@ class FeatureCollection():
         return self
 
     def __repr__(self):
-        return str(self.indices)
+        return 'FC: ' + str(self.indices)
+
+
+class CascadeNode():
+
+    def __init__(self, estimator_class, feature_col, prev_node):
+        self.estimator = estimator_class()
+        self.feature_col = feature_col
+        self.prev_node = prev_node
+        self._is_fit = False
+
+    def fit(self, X, y):
+        if self._is_fit:
+            raise RuntimeError("You've already fit this Node")
+
+        _X = X[:, self.feature_col.indices]
+        good_filter = np.prod(~np.isnan(_X), axis=1) == 1
+        miss_filter = np.prod(np.isnan(_X), axis=1) == 1
+
+        X_train = _X[good_filter, :]
+        y_train = y[good_filter]
+
+        if self.prev_node is not None:
+            # We need to get the Nx3 output of the previous Node first
+            y_prev = self.prev_node.predict(X)
+            X_train = np.hstack((_X, y_prev))[good_filter, :]
+
+        self.estimator = self.estimator.fit(X_train, y_train)
+        self._is_fit = True
+
+        return self
+
+    def predict(self, X):
+        if not self._is_fit:
+            raise RuntimeError("You need to fit this Node before predicting")
+
+        # New lists (2 of the 3 output features)
+        preds, is_missing = [], []
+
+        # Only the features this node is in charge of
+        _X = X[:, self.feature_col.indices]
+
+        if self.prev_node is not None:
+            # Retrieve predictions from previous node
+            y_prev = self.prev_node.predict(X)
+            ins = list(y_prev[:, 1])  # The predictions of the previous node
+            X_pred = np.hstack((_X, y_prev))
+        else:
+            # This is the first node, so make a list of Zeros for its input
+            # TODO should this be zeros? Nans?
+            ins = list(np.zeros(X.shape[0]))
+            X_pred = _X
+
+        # TODO vectorise this to make it faster
+        for prev, x in zip(ins, X_pred):  # Loop through rows
+            if np.isnan(x).any():  # If there are any missing features in row
+                preds.append(prev)
+                is_missing.append(1)
+            else:  # If all features are present in a row
+                preds.append(self.estimator.predict(x.reshape(1, -1))[0])
+                is_missing.append(0)
+        # Making sure everything is the right shape before hstacking
+        ins, preds, is_missing = np.array(
+            ins).reshape(-1, 1), np.array(preds).reshape(-1, 1), np.array(is_missing).reshape(-1, 1)
+
+        return np.hstack((ins, preds, is_missing))
+
+    def __repr__(self):
+        return 'CN: ' + str(type(self.estimator))
 
 
 class CascadingEnsemble():
 
-    def __init__(self):
+    def __init__(self, estimator_class=LinearRegression):
         logger.debug("Initialising CascadingEnsemble...")
         self.features = None
         self.feature_collections = []
+        self.estimator_class = estimator_class
+        self.nodes = {}
 
     def fit(self, X, y):
         logger.info(f"Fitting X {X.shape} and y {y.shape} ...")
@@ -37,15 +107,23 @@ class CascadingEnsemble():
         self._encode_features(X)
         logger.debug(f"Features: {self.features}")
 
-        '''Generate feature collections'''
+        '''Generate prioritised feature collections'''
         self._make_feature_collections_simple(X)
         logger.debug(f"{self.feature_collections}")
 
         '''Assign feature collections to estimators'''
-
-        '''Prioritise estimators'''
+        prev_node = None
+        for fc in self.feature_collections:
+            new_node = CascadeNode(self.estimator_class, fc, prev_node)
+            self.nodes[fc] = new_node
+            prev_node = new_node
+        logger.debug(f"Nodes: {self.nodes}")
 
         '''Train estimators'''
+        for i, fc in enumerate(self.feature_collections):
+            current_node = self.nodes[fc]
+            logger.debug(f"Fitting {current_node} on {fc}")
+            current_node.fit(X, y)
 
         return self
 
@@ -92,9 +170,8 @@ class CascadingEnsemble():
         for i in range(N_main):
             feat_cols.append(
                 FeatureCollection(ord_ind[i*3:(i+1)*3]))
-            start = i
 
-        for i in range(start, N_addon+1):
+        for i in range(N_main*3, len(ord_ind)):
             feat_cols.append(FeatureCollection(ord_ind[i]))
 
         self.feature_collections = feat_cols
