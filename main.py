@@ -1,4 +1,5 @@
 import numpy as np
+from sklearn.base import BaseEstimator
 from sklearn.model_selection import train_test_split
 from sklearn import datasets
 from sklearn.metrics import mean_squared_error as mse
@@ -10,6 +11,7 @@ import pandas as pd
 from loguru import logger
 from support import ham_distance, hamming_distances
 import sys
+from mlxtend.regressor import StackingRegressor
 
 
 class FeatureCollection():
@@ -27,7 +29,7 @@ class FeatureCollection():
         return 'FC: ' + str(self.indices)
 
 
-class CascadeNode():
+class CascadeNode(BaseEstimator):
 
     def __init__(self, estimator_class, feature_col, prev_node):
         self.estimator = estimator_class()
@@ -90,6 +92,9 @@ class CascadeNode():
 
         return np.hstack((ins, preds, is_missing))
 
+    def get_params(self, *args, **kwargs):
+        return self.estimator.get_params(*args, **kwargs)
+
     def __repr__(self):
         return 'CN: ' + str(type(self.estimator))
 
@@ -138,6 +143,9 @@ class CascadingEnsemble():
         Y = self.nodes[self.feature_collections[-1]].predict(X)
         # Return only the predictions (not ins and is_missing)
         return Y[:, 1]
+
+    def get_params(self, *args, **kwargs):
+        return {k: self.nodes[k].get_params(*args, **kwargs) for k in self.feature_collections}
 
     def _encode_features(self, X):
         logger.debug("Encoding features...")
@@ -229,7 +237,7 @@ class CascadingEnsemble():
 if __name__ == '__main__':
 
     logger.remove()
-    logger.add(sys.stderr, level="WARNING")
+    logger.add(sys.stderr, level="INFO")
 
     import warnings
     from sklearn.exceptions import ConvergenceWarning
@@ -246,12 +254,11 @@ if __name__ == '__main__':
     X_train, X_test, y_train, y_test = train_test_split(X, y)
 
     X_train_nan = X_train.copy()
-    nan_targets = np.random.randint(3, size=(X_train.shape))
+    nan_targets = np.random.randint(10, size=(X_train.shape))
     X_train_nan[nan_targets == 1] = np.NaN
 
     logger.debug(
         f"{X_train.shape}, {y_train.shape}, {X_test.shape}, {y_test.shape}")
-
 
     results = {}
 
@@ -286,14 +293,28 @@ if __name__ == '__main__':
         model = mod().fit(X_train, y_train)
         results[f"{mod.__name__} (full)"] = mse(y_test, model.predict(X_test))
 
-
         model = mod().fit(X_train_filled, y_train)
-        results[f"{mod.__name__} (fill 0)"] = mse(y_test, model.predict(X_test))
+        results[f"{mod.__name__} (fill 0)"] = mse(
+            y_test, model.predict(X_test))
 
         model = mod().fit(X_train_filled_med, y_train)
-        results[f"{mod.__name__} (fill m)"] = mse(y_test, model.predict(X_test))
+        results[f"{mod.__name__} (fill m)"] = mse(
+            y_test, model.predict(X_test))
 
         model = mod().fit(X_train_dropped, y_train_dropped)
         results[f"{mod.__name__} (drop)"] = mse(y_test, model.predict(X_test))
+
+    stregr = StackingRegressor(
+        regressors=[
+            CascadingEnsemble(estimator_class=LinearRegression),
+            CascadingEnsemble(estimator_class=Lasso),
+            CascadingEnsemble(estimator_class=MLPRegressor),
+            CascadingEnsemble(estimator_class=XGBRegressor),
+            ],
+        meta_regressor=XGBRegressor(),
+    ).fit(X_train_nan, y_train)
+    results[f"Stacked CSC"] = mse(y_test, stregr.predict(X_test))
+
+
 
     print(pd.DataFrame.from_dict(results, orient='index').sort_values(by=0))
