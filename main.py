@@ -249,10 +249,11 @@ class CascadingEnsemble():
 
         self.feature_collections = feature_collections
 
+
 if __name__ == '__main__':
 
     logger.remove()
-    logger.add(sys.stderr, level="DEBUG")
+    logger.add(sys.stderr, level="INFO")
 
     import warnings
     from sklearn.exceptions import ConvergenceWarning
@@ -269,8 +270,18 @@ if __name__ == '__main__':
     X_train, X_test, y_train, y_test = train_test_split(X, y)
 
     X_train_nan = X_train.copy()
-    nan_targets = np.random.randint(3, size=(X_train.shape))
+
+    # Replace values with nans after a certain index (selected at random)
+    nan_offsets = np.random.randint(X_train.shape[0] - 100, size=(X_train.shape[1]))
+    for i, offset in enumerate(nan_offsets):
+        X_train_nan[offset:, i] = np.NaN
+
+    # Randomly remove data points
+    nan_targets = np.random.randint(6, size=(X_train.shape))
     X_train_nan[nan_targets == 1] = np.NaN
+
+    logger.info(
+        f"Fraction NaNs: {np.isnan(X_train_nan).sum() / X_train_nan.size: .3f}")
 
     logger.debug(
         f"{X_train.shape}, {y_train.shape}, {X_test.shape}, {y_test.shape}")
@@ -325,11 +336,9 @@ if __name__ == '__main__':
             CascadingEnsemble(estimator_class=Lasso),
             CascadingEnsemble(estimator_class=MLPRegressor),
             CascadingEnsemble(estimator_class=XGBRegressor),
-            ],
+        ],
         meta_regressor=XGBRegressor(),
     ).fit(X_train_nan, y_train)
     results[f"Stacked CSC"] = mse(y_test, stregr.predict(X_test))
-
-
 
     print(pd.DataFrame.from_dict(results, orient='index').sort_values(by=0))
