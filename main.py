@@ -1,29 +1,27 @@
+import sys
+
 import numpy as np
-from sklearn.base import BaseEstimator
-from sklearn.model_selection import train_test_split
-from sklearn import datasets
-from sklearn.metrics import mean_squared_error as mse
-from sklearn.linear_model import LinearRegression, Lasso, BayesianRidge
-from sklearn.neural_network import MLPRegressor
-from sklearn.naive_bayes import GaussianNB
-from xgboost import XGBRegressor
 import pandas as pd
 from loguru import logger
-from support import ham_distance, hamming_distances
-import sys
+from matplotlib import pyplot as plt
 from mlxtend.regressor import StackingRegressor
 from scipy.cluster import hierarchy
-from matplotlib import pyplot as plt
+from sklearn import datasets
+from sklearn.base import BaseEstimator
+from sklearn.linear_model import BayesianRidge, Lasso, LinearRegression
+from sklearn.metrics import mean_squared_error as mse
+from sklearn.model_selection import train_test_split
+from sklearn.naive_bayes import GaussianNB
+from sklearn.neural_network import MLPRegressor
+from xgboost import XGBRegressor
+
+from support import ham_distance, hamming_distances
 
 
 class FeatureCollection():
     def __init__(self, indices, nan_vect):
         self.nan_vect = nan_vect
-
-        if isinstance(indices, int):
-            self.indices = [indices]
-        else:
-            self.indices = indices
+        self.indices = [indices] if isinstance(indices, int) else indices
 
     def __add__(self, ft2):
         self.indices.extend(ft2.indices)
@@ -128,11 +126,11 @@ class CascadingEnsemble():
 
         '''Generate prioritised feature collections'''
         if self.cluster_mode == 'legacy':
-        self._make_feature_collections(X)
+            self._make_feature_collections(X)
         elif self.cluster_mode == 'hierarchical':
             self._make_feature_collections_hierarchically(X)
         else:
-            raise ValueError(f"Unknown cluster_mode '{cluster_mode}'")
+            raise ValueError(f"Unknown cluster_mode '{self.cluster_mode}'")
 
         logger.debug(f"{self.feature_collections}")
 
@@ -145,7 +143,7 @@ class CascadingEnsemble():
         logger.debug(f"Nodes: {self.nodes}")
 
         '''Train estimators'''
-        for i, fc in enumerate(self.feature_collections):
+        for fc in self.feature_collections:
             current_node = self.nodes[fc]
             logger.debug(f"Fitting {current_node} on {fc}")
             current_node.fit(X, y)
@@ -168,36 +166,6 @@ class CascadingEnsemble():
         logger.debug("Encoding features...")
         self.features = {i: None for i in range(X.shape[1])}
 
-    def _make_feature_collections_simple(self, X):
-        # TODO deprecate
-        def nan_count(vec):
-            return np.sum(np.isnan(vec))
-
-        feat_cols = []
-
-        feat_vecs = np.hsplit(X, X.shape[1])
-        feat_nans = {i: nan_count(v) for i, v in enumerate(feat_vecs)}
-        logger.debug(f"feat_nans: {feat_nans}")
-
-        ordered = {k: v for k, v in sorted(
-            feat_nans.items(), key=lambda x: x[1])}
-        logger.debug(f"Ordered feat_nans: {ordered}")
-
-        ord_ind = list(ordered.keys())
-
-        N_main = len(ord_ind) // 3 - 1
-        N_addon = len(ord_ind) - 3 * N_main
-        logger.debug(f"N_main: {N_main} ({3*N_main}), N_addon: {N_addon}")
-
-        for i in range(N_main):
-            feat_cols.append(
-                FeatureCollection(ord_ind[i*3:(i+1)*3]))
-
-        for i in range(N_main*3, len(ord_ind)):
-            feat_cols.append(FeatureCollection(ord_ind[i]))
-
-        self.feature_collections = feat_cols
-
     def _make_feature_collections(self, X):
 
         logger.debug(f"Making missing value filter...")
@@ -215,7 +183,6 @@ class CascadingEnsemble():
         logger.debug(f"Initial feat. cols.:\n{feature_collections}")
 
         done = False
-        last_remaining = None
         while not done:
             logger.debug(f"Feat. cols.:\n{feature_collections}")
             nan_vectors = [fc.nan_vect for fc in feature_collections]
@@ -230,30 +197,25 @@ class CascadingEnsemble():
             paired = []
             pairs = []
             for i, fav in enumerate(favourites):
-                if favourites[fav] == i:
-                    if i not in paired and fav not in paired:
-                        pairs.append([i, fav])
-                        paired.append(i)
-                        paired.append(fav)
+                if favourites[fav] == i and i not in paired and fav not in paired:
+                    pairs.append([i, fav])
+                    paired.append(i)
+                    paired.append(fav)
             logger.debug(f"Pairs: {pairs}")
             remaining = [i for i in range(len(favourites)) if i not in paired]
             logger.debug(f"Remaining: {remaining}")
 
-            new_feature_collections = []
-            for (a, b) in pairs:
-                new_feature_collections.append(
-                    feature_collections[a] + feature_collections[b])
+            new_feature_collections = [
+                feature_collections[a] + feature_collections[b] for (a, b) in pairs
+            ]
 
             for rem in remaining:
                 new_feature_collections.append(feature_collections[rem])
 
             feature_collections = new_feature_collections
 
-            # if last_remaining == remaining:
             if len(feature_collections) <= self.__n_nodes:
                 done = True
-
-            last_remaining = remaining
 
         self.feature_collections = feature_collections
 
@@ -278,7 +240,6 @@ class CascadingEnsemble():
         self.feature_collections = []
         for i in range(1, T.max()+1):
             feat_inds = list(np.arange(n)[T == i])
-            print(feat_inds)
             fc = FeatureCollection(feat_inds, None)
             self.feature_collections.append(fc)
 

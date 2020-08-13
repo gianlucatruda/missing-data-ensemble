@@ -1,5 +1,6 @@
 import numpy as np
 
+
 def ham_distance(a, b):
     # http://code.activestate.com/recipes/499304-hamming-distance/
     diffs = 0
@@ -7,6 +8,7 @@ def ham_distance(a, b):
         if ch1 != ch2:
             diffs += 1
     return diffs
+
 
 def hamming_distances(vectors: list):
     dim = len(vectors)
