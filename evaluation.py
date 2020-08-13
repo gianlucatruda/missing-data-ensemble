@@ -14,14 +14,28 @@ from sklearn.metrics import mean_squared_error as mse
 from sklearn.model_selection import train_test_split
 from sklearn.naive_bayes import GaussianNB
 from sklearn.neural_network import MLPRegressor
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import KFold
 from xgboost import XGBRegressor
+from tqdm import tqdm
 
 from casc import CascadingEnsemble
 from support import ham_distance, hamming_distances
 
 
 def evaluate():
+
+    comparison_models = [
+        LinearRegression,
+        Lasso,
+        MLPRegressor,
+        BayesianRidge,
+        XGBRegressor,
+        DecisionTreeRegressor,
+        RandomForestRegressor,
+    ]
+
     # dset = datasets.load_diabetes()
     dset = datasets.load_boston()
     X = dset.data
@@ -83,20 +97,12 @@ def evaluate():
         print(
             f"Split {split}:\tTrain: {X_train_nan.shape}\tComplete:{X_train_dropped.shape}")
 
-        for est_class in [Lasso]: #[LinearRegression, Lasso, MLPRegressor, XGBRegressor]:
+        for est_class in comparison_models:
             casc = CascadingEnsemble(estimator_class=est_class)
             casc.fit(X_train_nan, y_train)
             pred = casc.predict(X_test)
             results['Model'].append(f"CSC ({est_class.__name__})")
             results['MSE'].append(mse(y_test, pred))
-
-        comparison_models = [
-            LinearRegression,
-            Lasso,
-            # MLPRegressor,
-            # BayesianRidge,
-            XGBRegressor
-        ]
 
         for mod in comparison_models:
 
@@ -116,17 +122,17 @@ def evaluate():
             results['Model'].append(f"{mod.__name__} (drop)")
             results['MSE'].append(mse(y_test, model.predict(X_test)))
 
-        # stregr = StackingRegressor(
-        #     regressors=[
-        #         CascadingEnsemble(estimator_class=LinearRegression),
-        #         CascadingEnsemble(estimator_class=Lasso),
-        #         CascadingEnsemble(estimator_class=MLPRegressor),
-        #         CascadingEnsemble(estimator_class=XGBRegressor),
-        #     ],
-        #     meta_regressor=XGBRegressor(),
-        # ).fit(X_train_nan, y_train)
-        # results['Model'].append(f"Stacked CSC")
-        # results['MSE'].append(mse(y_test, stregr.predict(X_test)))
+        stregr = StackingRegressor(
+            regressors=[
+                CascadingEnsemble(estimator_class=LinearRegression),
+                CascadingEnsemble(estimator_class=Lasso),
+                CascadingEnsemble(estimator_class=MLPRegressor),
+                CascadingEnsemble(estimator_class=XGBRegressor),
+            ],
+            meta_regressor=XGBRegressor(),
+        ).fit(X_train_nan, y_train)
+        results['Model'].append(f"Stacked CSC")
+        results['MSE'].append(mse(y_test, stregr.predict(X_test)))
 
     return pd.DataFrame(results).sort_values(by='MSE', ascending=True)
 

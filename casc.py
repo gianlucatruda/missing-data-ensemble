@@ -35,6 +35,7 @@ class FeatureCollection():
 class CascadeNode(BaseEstimator):
 
     def __init__(self, estimator_class, feature_col, prev_node):
+        # TODO allow passing args and kwargs
         self.estimator = estimator_class()
         self.feature_col = feature_col
         self.prev_node = prev_node
@@ -234,7 +235,7 @@ class CascadingEnsemble():
         logger.debug(f"nan_vectors: {len(nan_vectors)}")
 
         # Form flat clusters from the hierarchical clustering defined by the given linkage matrix.
-        clust_dist = rootnode.dist // 1.3  # TODO remove hardcoding
+        clust_dist = rootnode.dist // 1.3  # TODO remove hardcoding and optimise on silhouette score
         T = hierarchy.fcluster(Z, clust_dist, criterion='distance')
 
         # Create the feature collections from the clusters
