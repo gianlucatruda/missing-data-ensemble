@@ -12,6 +12,8 @@ from loguru import logger
 from support import ham_distance, hamming_distances
 import sys
 from mlxtend.regressor import StackingRegressor
+from scipy.cluster import hierarchy
+from matplotlib import pyplot as plt
 
 
 class FeatureCollection():
@@ -104,13 +106,14 @@ class CascadeNode(BaseEstimator):
 
 class CascadingEnsemble():
 
-    def __init__(self, estimator_class=LinearRegression, n_nodes=None):
+    def __init__(self, estimator_class=LinearRegression, cluster_mode='hierarchical', n_nodes=None):
         logger.debug("Initialising CascadingEnsemble...")
         self.features = None
         self.feature_collections = []
         self.estimator_class = estimator_class
         self.nodes = {}
         self.__n_nodes = n_nodes
+        self.cluster_mode = cluster_mode
 
     def fit(self, X, y):
         logger.info(f"Fitting X {X.shape} and y {y.shape} ...")
@@ -124,8 +127,13 @@ class CascadingEnsemble():
         logger.debug(f"Features: {self.features}")
 
         '''Generate prioritised feature collections'''
-        # self._make_feature_collections_simple(X)
+        if self.cluster_mode == 'legacy':
         self._make_feature_collections(X)
+        elif self.cluster_mode == 'hierarchical':
+            self._make_feature_collections_hierarchically(X)
+        else:
+            raise ValueError(f"Unknown cluster_mode '{cluster_mode}'")
+
         logger.debug(f"{self.feature_collections}")
 
         '''Assign feature collections to estimators'''
@@ -161,7 +169,7 @@ class CascadingEnsemble():
         self.features = {i: None for i in range(X.shape[1])}
 
     def _make_feature_collections_simple(self, X):
-
+        # TODO deprecate
         def nan_count(vec):
             return np.sum(np.isnan(vec))
 
@@ -249,6 +257,31 @@ class CascadingEnsemble():
 
         self.feature_collections = feature_collections
 
+    def _make_feature_collections_hierarchically(self, X):
+
+        logger.debug(f"Making hierarchy...")
+        _Xnull = np.transpose(pd.DataFrame(X).isnull().astype(int).values)
+        Z = hierarchy.linkage(_Xnull, 'average')
+        n = Z.shape[0] + 1
+        rootnode, nodelist = hierarchy.to_tree(Z, rd=True)
+        logger.debug(f"Hierarchy has {len(nodelist)} nodes")
+
+        # Split _X into vectors
+        nan_vectors = np.hsplit(X, X.shape[1])
+        logger.debug(f"nan_vectors: {len(nan_vectors)}")
+
+        # Form flat clusters from the hierarchical clustering defined by the given linkage matrix.
+        clust_dist = rootnode.dist // 1.3  # TODO remove hardcoding
+        T = hierarchy.fcluster(Z, clust_dist, criterion='distance')
+
+        # Create the feature collections from the clusters
+        self.feature_collections = []
+        for i in range(1, T.max()+1):
+            feat_inds = list(np.arange(n)[T == i])
+            print(feat_inds)
+            fc = FeatureCollection(feat_inds, None)
+            self.feature_collections.append(fc)
+
 
 if __name__ == '__main__':
 
@@ -262,9 +295,11 @@ if __name__ == '__main__':
     warnings.filterwarnings(action="ignore", module="sklearn",
                             category=ConvergenceWarning)
 
-    boston = datasets.load_boston()
-    X = boston.data
-    y = boston.target
+    # dset = datasets.load_diabetes()
+    dset = datasets.load_boston()
+    X = dset.data
+    y = dset.target
+
     print(y.min(), y.max())
 
     X_train, X_test, y_train, y_test = train_test_split(X, y)
@@ -272,7 +307,8 @@ if __name__ == '__main__':
     X_train_nan = X_train.copy()
 
     # Replace values with nans after a certain index (selected at random)
-    nan_offsets = np.random.randint(X_train.shape[0] - 100, size=(X_train.shape[1]))
+    nan_offsets = np.random.randint(
+        X_train.shape[0] - 50, size=(X_train.shape[1]))
     for i, offset in enumerate(nan_offsets):
         X_train_nan[offset:, i] = np.NaN
 
@@ -285,6 +321,11 @@ if __name__ == '__main__':
 
     logger.debug(
         f"{X_train.shape}, {y_train.shape}, {X_test.shape}, {y_test.shape}")
+
+    # Visualise missing data
+    import missingno as msno
+    msno.dendrogram(pd.DataFrame(X_train_nan))
+    plt.savefig('latest_cluster.png')
 
     results = {}
 
