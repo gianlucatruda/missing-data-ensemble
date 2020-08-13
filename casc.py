@@ -87,6 +87,7 @@ class CascadeNode(BaseEstimator):
                 preds.append(prev)
                 is_missing.append(1)
             else:  # If all features are present in a row
+                # TODO optimise this prediction line
                 preds.append(self.estimator.predict(x.reshape(1, -1))[0])
                 is_missing.append(0)
         # Making sure everything is the right shape before hstacking
