@@ -143,6 +143,7 @@ class CascadingEnsemble():
             self.nodes[fc] = new_node
             prev_node = new_node
         logger.debug(f"Nodes: {self.nodes}")
+        self.__n_nodes = len(self.nodes.keys())
 
         '''Train estimators'''
         for fc in self.feature_collections:
@@ -235,7 +236,8 @@ class CascadingEnsemble():
         logger.debug(f"nan_vectors: {len(nan_vectors)}")
 
         # Form flat clusters from the hierarchical clustering defined by the given linkage matrix.
-        clust_dist = rootnode.dist // 1.3  # TODO remove hardcoding and optimise on silhouette score
+        # TODO remove hardcoding and optimise on silhouette score
+        clust_dist = rootnode.dist // 1.3
         T = hierarchy.fcluster(Z, clust_dist, criterion='distance')
 
         # Create the feature collections from the clusters
